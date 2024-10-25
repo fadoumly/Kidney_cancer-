@@ -1,0 +1,525 @@
+---
+title: "LY Fadoum Ousmane - Cancer rénal"
+output:
+  html_document:
+    df_print: paged
+---
+
+Vous devez me rendre un compte-rendu **avant mardi 12 mars à la fin de la séance** (par mail: [alexandre.dos-santos\@u-pec.fr](mailto:alexandre.dos-santos@u-pec.fr)).
+
+Vous pouvez, uniquement pendant la durée du TP, me poser des questions, si vous ne comprenez pas certaines questions ou si vous avez des difficultés à transcrire vos idées d'analyses en langage R.
+
+Utilisez ce fichier Notebook pour répondre directement aux questions
+
+Vous serez noté sur:
+
+-   Vos compétences à comprendre les questions énoncées
+
+-   Traduire en R les étapes d'analyses
+
+-   Votre capacité à commenter, discuter et conclure les résultats obtenus
+
+**TOUTES VOS RÉPONSES DOIVENT ÊTRE JUSTIFIÉES !!!**
+
+***N'oubliez pas de sauvegarder régulièrement votre document !!!!***
+
+# The Cancer Genome Atlas Program (TCGA)
+
+L'**Atlas du génome du cancer** (TCGA), un programme historique de génomique du cancer, a caractérisé moléculairement plus de **20 000 échantillons primaires de cancer et d'échantillons normaux appariés couvrant 33 types de cancer**. Cet effort conjoint du NCI et du National Human Genome Research Institute a débuté en 2006, réunissant des chercheurs de diverses disciplines et de plusieurs institutions.
+
+Au cours des douze années suivantes, le TCGA a généré plus de 2,5 pétaoctets de données génomiques, épigénomiques, transcriptomiques et protéomiques. Ces données, qui ont déjà permis d'améliorer notre capacité à diagnostiquer, traiter et prévenir le cancer, resteront accessibles au public et pourront être utilisées par toute la communauté des chercheurs.
+
+Chargement des librairies
+
+```{r}
+library(factoextra)
+library(ggplot2)
+library(dplyr)
+library(FactoMineR)
+library(reshape2)
+library(missMDA)
+```
+
+## Le cancer rénal
+
+### Données cliniques
+
+Vous allez travailler sur les données cliniques de la cohorte **Pan-kidney (TCGA-KIPAN)** avec le fichier *TCGA_KIPAN_clinical_datas.csv*
+
+*Import des données*
+
+```{r}
+donnees_cliniques<-read.csv("TCGA_KIPAN_clinical_datas.csv", sep="")
+#Inverser mon tableau
+donnees_cliniques_inverse<-t(donnees_cliniques)
+#Suppression de la première ligne 
+donnees_cliniques_inverse_final  <- donnees_cliniques_inverse[-1,]
+#Renommer les colonnes
+colonnes <- c("years_to_birth","pathologic_stage","pathology_T_stage","pathology_N_stage","pathology_M_stage","histological_type","gender","radiation_therapy","race", "ethnicity", "overall_survival","status","overallsurvival")
+colnames(donnees_cliniques_inverse_final)<- colonnes
+donnees_cliniques<-data.frame(donnees_cliniques_inverse_final)
+```
+
+**Combien de femmes et d'hommes sont répertoriés dans ce fichier ?**
+
+```{r}
+table(donnees_cliniques$gender)
+```
+
+Il y a 622 hommes et 319 femmes répertoriés dans le fichier contenant les données cliniques.
+
+**Comparez l'âge des patients au diagnostic (*years_to_birth*) en fonction du sexe. Commentez**
+
+*Graphique*
+
+```{r}
+donnees_cliniques$years_to_birth<-as.numeric(donnees_cliniques$years_to_birth)
+donnees_cliniques$gender<-as.factor(donnees_cliniques$gender)
+
+# Création du boxplot avec les couleurs en fonction du sexe
+boxplot(years_to_birth ~ gender, data = donnees_cliniques,
+        xlab = "Genre", ylab = "Age", col = c("pink", "blue"))
+
+
+```
+
+Hypothèse: Il ne semble pas y avoir de différence de distribution des ages en fonction du sexe. Pour confirmer ou infirmer cette hypothese, réalisons un test de comparaison de l'age moyen ou médian des patients en fonction du sexe.
+
+*Tests*
+
+La réalisation du test de comparaison de moyenne (t.test) requiert la normalité des données de chaque groupe ainsi que l'homogénéité des variances. Procédons à la vérification de ces deux conditions.
+
+1.  *Normalité des données: Test de normalité de shapiro-wilk*
+
+```{r}
+#Séparation des données des deux groupes en  deux tableaux 
+male<-subset(donnees_cliniques, donnees_cliniques$gender=="male")
+female<-subset(donnees_cliniques, donnees_cliniques$gender=="female")
+#Tests
+#HO: Les données suivent une loi normale
+#H1: Inverse
+shapiro.test(male$years_to_birth)
+shapiro.test(female$years_to_birth)
+```
+
+Conclusion: Les données d'age des deux goupes (homme et femme) ne suivent pas une loi normale (p-\<0,05).
+
+2.  *Test de comparaison des ages medians des hommes et des femmes: test de wilcoxon*
+
+```{r}
+#Ho : Les médianes des deux groupes sont égales 
+#H1: Les médiane ne sont pas égales
+wilcox.test(data=donnees_cliniques,years_to_birth~gender)
+
+#Calculs des ages moyens
+summary(male$years_to_birth)
+summary(female$years_to_birth)
+
+```
+
+Conclusion: L'age médian des hommes ayant un cancer rénal (60 ans ; male) n'est pas significativement différent (Wilcoxon rank sum test, p-value =0.4414\>0.05 ) de celui des femmes ayant un cancer rénal (60 ans ; female).
+
+Cela indiquerait qu'en termes d'âge médian, le cancer rénal ne semble pas présenter de prédisposition ou de différence significative entre les hommes et les femmes. Cependant, il est important de noter que cette interprétation se limite à l'âge et ne prend pas en compte d'autres facteurs potentiels qui pourraient être étudiés pour comprendre les différences de cancer rénal entre les sexes.
+
+**Combien de types histologiques de cancer rénal existe-t-il ? Y a-t-il un lien avec le sexe et/ou l'âge ?**
+
+```{r}
+donnees_cliniques$histological_type<-as.factor(donnees_cliniques$histological_type)
+levels(donnees_cliniques$histological_type)
+
+#Faire un graphe montrant les différents types histologiques de cancer rénal
+# Compter les occurrences de chaque niveau
+niveaux <- table(donnees_cliniques$histological_type)
+
+# Créer un plot avec barplot
+barplot(niveaux, main = "Occurrences des types histologiquues", xlab = "Types histologiques", ylab = "Nombre d'occurrences", col=c("orange", "brown","green"))
+
+levels(donnees_cliniques$histological_type)
+
+```
+
+En fonction de l'apparence sous microscope, autrement dit, selon le type histologique, on distingue trois types de cancer rénal:
+
+-   Le carcinome rénal chromophobe ou Kidneychromophobe
+
+-   Le carcinome à cellules claires ou Kidneyclearcellrenalcarcinoma
+
+-   Le carcinome papillaire ou kidneypapillaryrenalcellcarcinoma
+
+La classification des patients selon le type histologique (barplot ci-dessus) semble mettre en exergue que:
+
+Le carcinome à cellules claires (Kidneyclearcellrenalcarcinoma) est le type de cancer du rein le plus fréquent, suivi du carcinome papillaire (kidneypapillaryrenalcellcarcinoma). A l'inverse, le carcinome rénal chromophobe ou Kidneychromophobe semble etre le moins fréquent.
+
+**Existe t-il un lien entre les types histologiques et le sexe?**
+
+Pour répondre à cette question, nous observerons les fréquences des trois types de cancer chez le groupe de patients de sexe masculin et chez celui de sexe féminin.
+
+```{r}
+#Créer un tableau contenant les données de types histologiques en fonction du genre 
+Histologicaltypes_gender<-table(donnees_cliniques$histological_type,donnees_cliniques$gender)
+Histologicaltypes_gender<-as.data.frame(Histologicaltypes_gender)
+
+ggplot(data = Histologicaltypes_gender, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  scale_fill_manual(values = c("pink", "blue")) +  # Définir les couleurs manuellement
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Type histologique (Type de cancer)", y = "Fréquence", fill = "Genre")
+
+```
+
+L'analyse du graphique ci-dessus montrant la fréquence des types types histologiques en fonction du genre permet de relater que:
+
+D'une part, on peut constater que l'hypothèse émise quant à la fréquence des trois types de cancer semble etre vérifiée chez les patients de sexe masculin et féminin. En effet, on constate que chez les hommes et les femmes, les kidneyclearcellrenalcarcinoma sont plus fréquents que les kidneypapillaryrenalcellcarcinoma et les kidneychromophobe; ce qui mis en évidence par les proportions ci-dessous.
+
+**Calcul des proportions des types histologiques chez les hommes et femmes**
+
+```{r}
+#Calcul des fréquences des types histologiques
+freq_histological_gender <- table(donnees_cliniques$histological_type, donnees_cliniques$gender)
+
+# Calculer la fréquence relative en divisant par le nombre total d'observations par sexe
+freq_relative_gender <- prop.table(freq_histological_gender, margin = 2)
+print(freq_relative_gender)
+```
+
+D'autre part, il semblerait que les trois types de cancer du rein sont plus fréquents chez les hommes que chez les femmes. Cela signifierait qu'en se basant sur les types histologiques, le cancer du rein serait plus fréquent chez les hommes que chez les femmes. Pour savoir s'il exite une différence significative des types histologiques selon le sexe, réalisons un test de chi2 (car on a deux variables catégorielles).
+
+```{r}
+#Test du Chi-deux (χ²) 
+
+# Créer un tableau de contingence, pour pouvoir effectuer le test de de chi2
+table_contingency <- table(donnees_cliniques$histological_type, donnees_cliniques$gender)
+
+# Afficher le tableau de contingence
+print(table_contingency)
+chisq.test(table_contingency)
+```
+
+La p-value obtenue à partir du test de Chi2 est p = 0.0008181\< 0.05 suggère qu'il existe une différence hautement significative entre les types histologiques de cancer rénal selon le sexe des patients.
+
+Cela indique que le sexe des patients pourrait jouer un rôle dans la distribution des types histologiques de cancer rénal. Il pourrait être utile d'explorer davantage cette relation, en étudiant par exemple l'influence de l'age (meme si on a vu qu'il n'y avait pas d'impact de l'age) sur la distribution des types de cancers selon le sexe pour comprendre les facteurs sous-jacents qui pourraient contribuer à ces différences.
+
+**Y a-t-il un lien avec le sexe et l'âge ?**
+
+```{r}
+# Créer le boxplot
+ggplot(donnees_cliniques, aes(x = histological_type, y = years_to_birth, fill = gender)) +
+  geom_boxplot() +
+  labs(title = "Boxplot de l'Âge en fonction du Type Histologique et du Sexe",
+       x = "Type Histologique", y = "Âge") +
+  scale_fill_manual(values = c("male" = "lightblue", "female" = "lightpink"))
+
+```
+
+```{r}
+# Créer le graphique à facettes
+ggplot(donnees_cliniques, aes(x = years_to_birth, fill = histological_type)) +
+  geom_bar() +
+  facet_grid(gender ~ .) +
+  labs(title = "Distribution des types cancer rénal en fonction de l'Âge et du Sexe", x = "Âge", y = "Proportion") +
+  scale_fill_manual(values = c("kidneychromophobe" = "lightblue", "kidneyclearcellrenalcarcinoma" = "lightpink", "kidneypapillaryrenalcellcarcinoma" = "lightgreen"))
+
+```
+
+L'analyse de la distribution des types cancer rénal en fonction de l'age et du sexe montre un effet du sexe comme nous l'avons souligné précédemment.
+
+-   **Effet du sexe** : Les propotions des trois types de cancer du rein sont plus importantes chez les hommes que chez les femmes.
+-   **Effet de l'âge** : On peut également noter que les patients ayant des cancers rénaux (hommes et femmes). Cela signifierait-il que les cancers du rein surviendrait après 25 ans chez les hommes et les femmes ? Pas forcément, il s'agit de l'age minimale de diagnostic de cancer rénal des patients.
+
+Le stade tumoral (*pathologic_stage*) établit un score en fonction de l'extension d'une tumeur. Plus le degré est élevé plus la tumeur est étendu et agressive.
+
+**Y a-t-il un type de tumeur plus agressif que les autres ?**
+
+De facon générale, les tumeurs aggressives sont caractérisées par une croissance rapide, une tendance à la métastase, un taux de récidive élevé et une forte résistance au traitement.
+
+Pour répondre à cette question, nous étudierons les trois types de cancer du rein en fonction du stade de développement ainsi que du taux de surie et du nombre de décés selon le type.
+
+```{r}
+ggplot(donnees_cliniques, aes(x = histological_type,fill = pathology_T_stage)) +
+  geom_bar() +
+  labs(title = "Stades de développement des trois types de cancer rénal",
+       x = "Type Histologique", y = "Occurrence ")
+
+
+```
+
+La cancer du rein à cellules claires (Kidneyclearcellcarcinoma) semble etre celui qui compte le plus de stades avancés de cancer rénal par rapport aux autres types et surtout le plus fréquent comme nous l'avions observé dans la partie précédente.
+
+Cette observation pourrait s'expliquer par le fait que les cellules cancéreuses de ce type se développent et se propagent plus rapidement que les deux autres types. Les stades avancés de cancer rénal étant généralement plus difficiles à traiter et onayant un pronostic plus défavorable que les stades précoces, il serait plus crucial de détecter et de diagnostiquer le cancer du rein à un stade précoce pour améliorer les chances de guérison et de réduire la morbidité et la mortalité associées à cette maladie. De ce fait, observons les taux de survie et de décès selon le type de cancer.
+
+*Boxplot de la survie en fonction du type de tumeurs (histological_types) + voir dans quel type de cancer on a le plus de décès*
+
+```{r}
+#Boxplot Boxplot representant la Difference de nbr de jour de survie selon le type hystologique
+# Convertir la variable overall_survival en numérique et ignorer les valeurs manquantes
+donnees_cliniques<-donnees_cliniques[ ,-1]
+donnees_cliniques$overall_survival <- as.numeric((donnees_cliniques$overall_survival))
+
+ggplot(data=donnees_cliniques, aes(x=histological_type,y=overall_survival, fill=histological_type))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  labs (x=" Type histologique",y = " Nombre de jours de survie",title = "Durée de vie des patients après diagnostic selon le type de cancer ")
+
+```
+
+L'analyse de la distribution des trois types de cancer du rein en fonction de la survie après le diagnostic révèle des tendances distinctes dans les trois cas. Le carcinome rénal à cellues claires et le carcinome paillaire présente une distribution de survie caractérisée par une médiane plus basse, suggérant que ces types de cancer serait le plus aggressif.
+
+En revanche, le carcinome chromophobe montre une médiane de survie plus élevée. Cependant, il est important de noter que des valeurs aberrantes (kidneyclearcellrenalcarcinoma par exemple, il semble avoir moult valeurs abérrantes), indiquant des cas individuels avec des résultats de survie exceptionnels. Ces résultats soulignent l'importance de prendre en compte les caractéristiques histologiques du cancer du rein lors de l'évaluation du pronostic et de la planification du traitement pour les patients atteints de cette maladie.
+
+*Réalisation d'un test de comparaison de moyennes ou médianes selon la normalité ou non des données*
+
+Test de normalité de shapiro
+
+```{r}
+#Test de normalité de shapiro
+donnees_cliniques$overall_survival<- as.numeric(donnees_cliniques$overall_surviva)
+shapiro.test(donnees_cliniques$overall_survival)
+
+```
+
+Test de kruskall-Wallis
+
+Les données ne suivent pas la loi normale. Donc on réalise un test de Kruskall-Wallis qui compare les survies médianes des trois groupes
+
+```{r}
+#Le test de Kruskal-Wallis peut être utilisé pour déterminer si au moins deux groupes diffèrent l'un de l'autre. Le test de Kruskal-Wallis n'apporte pas de réponse à la question de savoir lequel des groupes diffère ; un test post-hoc est nécessaire à cet effet.À cette fin, le test de Dunn est le test non paramétrique approprié pour la comparaison multiple par paire.
+kruskal.test(donnees_cliniques$overall_survival~ donnees_cliniques$histological_type) #On rejette H0. Au moins un groupe diffère
+
+donnees_cliniques$overall_survival<-as.numeric(donnees_cliniques$overall_survival)
+pairwise.wilcox.test(donnees_cliniques$overall_survival, donnees_cliniques$histological_type, p.adj="bonf")   
+```
+
+Le test post-hoc utilisant la méthode de bonferroni montre qu'il existe une différence très significaticative du taux de survie selon le type de tumeurs; ce qui ne permet de déterminer le type de cancer le plus aggréssif. Observons les propotions de décès de chaque type de tumeur.
+
+Décès selon le type de cancer
+
+```{r}
+donnees_cliniques$histological_type <-as.factor(donnees_cliniques$histological_type)
+# Renommer les valeurs 0 en "vivant" et 1 en "décédé"
+donnees_cliniques$status <- ifelse(donnees_cliniques$status == "0", "vivant", 
+                                   ifelse(donnees_cliniques$status == "1", "décédé", NA))
+# Créer la table croisée
+survie <- table(donnees_cliniques$histological_type, donnees_cliniques$status)
+
+
+# Imprimer la table
+print(survie)
+
+```
+
+```{r}
+#Calcul des proportions de vivants et de morts par type de cancer 
+# Créer une table croisée entre histological_type et status
+survie <- table(donnees_cliniques$histological_type, donnees_cliniques$status)
+
+# Calculer les proportions par ligne (par type de cancer du rein) et les convertir en pourcentages avec deux chiffres après la virgule
+proportions <- round(prop.table(survie, margin = 1) * 100, digits = 2)
+
+# Afficher les proportions en pourcentage
+print(proportions)
+
+```
+
+Conclusion: En considérant les stades de développement et le taux de décés, nous pouvons avancer que la tumeur la plus aggressive est le cancer rénal à cellules claires (Kidneyclearcellcarcinoma); ce qui peut etre observé sur la représentation ci-dessous
+
+```{r}
+couleurs <- c("green","orange")
+for (i in 1:nrow(proportions)) {
+  # Calculer les pourcentages pour chaque tranche
+  percent_vivant <- proportions[i, "vivant"]
+  percent_decede <- proportions[i, "décédé"]
+  
+  # Dessiner le camembert avec les étiquettes et la légende
+  pie(proportions[i, ], main = rownames(proportions)[i], col = couleurs, cex = 0.8, clockwise = TRUE, density = c(percent_decede, percent_vivant))  # Supprimer les étiquettes
+  
+  # Ajouter les étiquettes avec les pourcentages à côté de chaque tranche
+  legend("topright", legend = c("Décédé", "Vivant"), bty = "n", cex = 0.8)
+}
+```
+
+```{r}
+table(donnees_cliniques$pathologic_stage,donnees_cliniques$status)
+
+```
+
+Il existe un grand nombre de données manquantes.
+
+```{r}
+# Vérifier les valeurs manquantes dans le tableau de données
+valeurs_manquantes <- is.na(donnees_cliniques)
+
+# Compter le nombre de valeurs manquantes dans chaque colonne
+nombre_manquant_par_colonne <- colSums(valeurs_manquantes)
+
+# Afficher le nombre de valeurs manquantes par colonne
+print(nombre_manquant_par_colonne)
+
+#nbr de NA par variable
+
+colSums(is.na(donnees_cliniques))
+```
+
+**Pouvez-vous trouver un moyen d'imputer des valeurs ? Expliquez !**
+
+Les données manquantes sont imputées en utilisant la fonction MCA. Il s'agit d'une méthode qui utilise les relations entre les variables observées dans un ensemble de données catégorielles pour estimer les valeurs manquantes. La MCA permet d'explorer ces relations et de résumer la variabilité dans un espace multidimensionnel. En utilisant ces informations, les valeurs manquantes sont estimées en fonction des valeurs observées des autres variables dans le même ensemble de données, tout en préservant les relations entre les variables. Cette approche permet de minimiser la perte d'information lors de l'imputation des données manquantes.
+
+```{r}
+#imputation des donné manquante a l'aide d'une MCA
+MCA_data_imputé<- imputeMCA(donnees_cliniques[,-c(1,11,13)])
+```
+
+### Données transcriptomiques
+
+Vous disposez également d'un tableau de comptage normalisé d'un séquençage d'ARN de tissus cancéreux de ces patients (*TCGA_KIPAN_mRNA_datas.csv*).
+
+```{r}
+#import de nos données et gestion du tableau
+data_mRNA<- read.csv('TCGA_KIPAN_mRNA_datas.csv',sep="")
+data_mRNA<- t(data_mRNA)
+data_mRNA<-as.data.frame(data_mRNA)
+
+colnames(data_mRNA) <- data_mRNA[1, ]
+data_mRNA <- data_mRNA[-1, ]
+data_mRNA <- data.frame(data_mRNA[1], lapply(data_mRNA[-1], function(x) as.numeric(as.character(x))))
+# Boucle à travers toutes les colonnes du dataframe pour convertir en données numériques 
+for (col in names(data_mRNA)) {
+  data_mRNA[[col]] <- as.numeric(data_mRNA[[col]])
+}
+head(data_mRNA)
+```
+
+**Combien de gènes ont été séquencés ?**
+
+```{r}
+# Determine the number of columns
+num_cols <- ncol(data_mRNA)
+
+# Print the number of columns
+print(num_cols)
+```
+
+Il y a **20.190 gènes** qui ont été séquencés.
+
+A l'aide d'une méthode capable de traiter un grand nombre de variables, cherchez à déterminer des relations entre le transcriptome global et les caractéristiques cliniques des patients.
+
+*Préparation des données et fusion des deux tableaux contenant les données cliniques des patients et celui des données de transcriptomique*
+
+```{r}
+#Selectionner les données de l'age, du genre, du type de cancer , le stade de développement du cancer 
+donnees_cliniques$years_to_birth<-as.numeric(donnees_cliniques$years_to_birth)
+donnees_cliniques$gender<-as.factor(donnees_cliniques$gender)
+donnees_cliniques$histological_type<-as.factor(donnees_cliniques$histological_type)
+donnees_cliniques$pathologic_stage<-as.factor(donnees_cliniques$pathologic_stage)
+
+# Sélectionner les colonnes "gender" et "years_to_birth"
+donnees_cliniques_select <- select(donnees_cliniques, c("gender", "years_to_birth","histological_type", "pathologic_stage"))
+
+#Fusion de nos deux tableaux et gestion 
+data_clinique_mRNA_merge <- merge(donnees_cliniques_select,data_mRNA, by ='row.names', all = FALSE)
+rownames(data_clinique_mRNA_merge)<-data_clinique_mRNA_merge$Row.names
+data_clinique_mRNA_merge<-data_clinique_mRNA_merge[ ,-1]
+data_clinique_mRNA_merge<-na.omit(data_clinique_mRNA_merge)
+head(data_clinique_mRNA_merge)
+
+#Voir si les données manquantes NA sont supprimées
+sum(is.na(data_clinique_mRNA_merge)) #0: il n'y a plus de données manquantes 
+dim(data_clinique_mRNA_merge)  #le  nombre de lignes et de colonnes 
+```
+
+Réalisation de l'ACP
+
+```{r}
+res<-PCA(data_clinique_mRNA_merge, quali.sup = c(1:4), graph = F, scale.unit = T)
+```
+
+1.  **Relation entre le transcriptome global et le sexe des patients atteints de cancer rénal**
+
+Graphe des patients selon le sexe
+
+```{r}
+fviz_pca_ind(res, geom="point", habillage= data_clinique_mRNA_merge$gender,addEllipses = T)
+```
+
+*Analyse et interprétation:*
+
+D'après le graphe des individus suivants, on peut remarquer que globalement il n'y a pas de différences de transcriptomes en fonction du sexe des patients atteints de cancer du rein.
+
+Cela indiquerai que, sur la base des données transcriptomiques analysées, le sexe des patients n'influence pas de manière significative la signature génique du cancer du rein. Ces résultats sont importants car ils suggèrent que les mécanismes biologiques sous-jacents du cancer du rein pourraient être similaires entre les sexes, du moins dans le contexte spécifique des échantillons analysés. le prof a dit que c'était bien ce que j'ai fait.
+
+2.  **Relation entre le transcriptome global et le type de tumeurs**
+
+Graphe des patients selon le type de cancer rénal
+
+```{r}
+fviz_pca_ind(res, geom="point", habillage= data_clinique_mRNA_merge$histological_type, addEllipses = T)
+```
+
+*Analyse et interprétation:*
+
+Globalement, on observe des profils transcriptomiques différents selon le type de cancer rénal. Cette observation souligne la diversité moléculaire existant entre les différents types de ce cancer. Cette variation de profils transcriptomiques pourrait etre due à plusieurs facteurs :
+
+**Altérations génétiques spécifiques :** Chaque type de cancer rénal serait associé à des altérations génétiques particulières. Par exemple, le carcinome à cellules claires est souvent associé à la perte de la fonction du gène VHL (Nabi et al., 2018, *Renal cell carcinoma: a review of biology and pathophysiology*), tandis que le carcinome papillaire peut présenter des mutations du gène MET. Ces altérations influenceraient ainsi les schémas d'expression génique dans chaque type de cancer.
+
+**Voies de signalisation altérées :** En conséquence, les altérations génétiques dans les différents types de cancer rénal pourraient provoquer des dysfonctionnements dans des voies de signalisation cellulaires spécifiques. Par exemple, la voie de l'hypoxie est fréquemment activée dans le carcinome à cellules claires en raison de la perte de VHL (Nabi et al., 2018, *Renal cell carcinoma: a review of biology and pathophysiology*). Ces variations dans les voies de signalisation contribuent également à la diversité des profils transcriptomiques. En effet, si une voie de signalisation est activée ou inhibée, cela pourrait avoir un impact sur les facteurs de transcription, plus précisément sur l'expression des gènes impliqués dans cette voie (car liaison ou non a l'element de réponse spécifique en amont du gène).
+
+**Microenvironnement tumoral :** Les caractéristiques du microenvironnement tumoral, telles que l'apport en nutriments, l'oxygénation et les interactions avec les cellules immunitaires, peuvent également influencer les profils transcriptomiques. La composition et les propriétés du microenvironnement pourraient varier d'une tumeur à l'autre, ce qui se reflètraite dans les profils d'expression génique observés.
+
+Il est tout de meme important de noter que le carcinome à cellules claires et le carcinome papillaire semblent avoir en commun une expression de certains gènes. Cela pourrait mettre en exergue une similitude moléculaire entre ces deux types de cancer rénal. Cette similitude peut découler de voies de signalisation communes, d'origines cellulaires similaires et de l'hétérogénéité tumorale.
+
+De surcroit, certains patients ayant le carcinome à cellules claires et le carcinome papillaire semblent exprimer des gènes caractéristiquent du carcinome rénal chromophobe.
+
+3.  **Relation entre le transcriptome global et le stade de développement des tumeurs**
+
+Graphe des patients selon le stade de développement des tumeurs
+
+```{r}
+fviz_pca_ind(res, geom="point", habillage= data_clinique_mRNA_merge$pathologic_stage, addEllipses = T)
+```
+
+*Analyse et interprétation:*
+
+Globalement, on pourrait avancer que les différents stades de développement sont caractérisés par des les transcriptomes. Cependant, il est important de noter qu'il s'agit ici de transcriptomes des trois types de cancer rénal et dans la premiere partie nous avions constaté que chacun des cancer est constitué de différents stades de développement. Ainsi, il faudrait faire l'ACP pour un type de tumeur pour étudier son transcriptome en fonction des stades de développement. Cette observation met en évidence l'importance de considérer à la fois les différents types de cancer rénal et les stades de développement spécifiques à chaque type lors de l'étude des transcriptomes. En effet, chaque type de cancer rénal peut présenter une progression tumorale distincte, caractérisée par des altérations moléculaires spécifiques à différents stades de développement.
+
+Graphe des patients atteints de cancer rénal à cellules claires le stade de développement des tumeurs
+
+```{r}
+data_clearcarcinoma<-subset(data_clinique_mRNA_merge, data_clinique_mRNA_merge$histological_type=="kidneyclearcellrenalcarcinoma")
+data_clearcarcinoma<-as.data.frame(data_clearcarcinoma)
+res1<-PCA(data_clearcarcinoma, quali.sup = c(1:4), graph = F, scale.unit = T)
+fviz_pca_ind(res1, geom="point", habillage= data_clearcarcinoma$pathologic_stage, addEllipses = T)
+```
+
+*Analyse et interprétation:*
+
+On peut constater que pour le cancer rénal à cellules claires, les transcriptomes selon les stades de développement semblent présenter une grande similarité. Qu'est ce qui caractérisent alors les différents stades du cancer?
+
+Nous pourrions ainsi conclure que les différents stades de développement du cancer rénal à cellules claires peuvent présenter une similarité dans leurs transcriptomes, mais seraient caractérisés par d'autres aspects distincts tels que l'extension de la tumeur dans le rein et les tissus environnants, l'envahissement ganglionnaire régional, la présence de métastases à distance ou d'autres caractéristiques histologiques spécifiques telles que le degré de différenciation cellulaire et la présence de nécrose tumorale.
+
+Bien que les transcriptomes puissent être similaires, ces facteurs cliniques, histologiques et moléculaires définissent les différents stades de la maladie et sont importants pour la classification et la prise en charge des patients atteints de cancer rénal à cellules claires.
+
+4.  **Relation entre le transcriptome global et l'age de diagnostic du cancer rénal chez les patients**
+
+Graphe des patients selon l'age de diagnostic
+
+```{r}
+# Calcul des quartiles
+quartiles_ages <- quantile(data_clinique_mRNA_merge$years_to_birth, probs = c(0, 0.25, 0.5, 0.75, 1))
+
+# Créer un vecteur de labels avec les noms des quartiles
+labels_quartiles <- c("Q1", "Q2", "Q3", "Q4", "Q5")
+
+# Discréditer les âges en quantiles en spécifiant les labels corrects
+data_clinique_mRNA_merge$quartiles_age <- cut(data_clinique_mRNA_merge$years_to_birth, 
+                                              breaks = quartiles_ages, 
+                                              labels = labels_quartiles[-length(labels_quartiles)])
+
+# Affichage du PCA avec les quartiles des âges comme habillage
+fviz_pca_ind(res, geom = "point", habillage = data_clinique_mRNA_merge$quartiles_age, addEllipses = TRUE)
+
+```
+
+*Analyse et interprétation:*
+
+Globalement, on pourrait précédemment avancer que les patients ayant les trois types de tumeurs partagent moult transcriptomes. Cependant, il est à noter que pour chacune des trois tumeurs on retrouve des individus de différents ages. Ainsi, il faudrait faire l'ACP pour un type de tumeur pour étudier son transcriptome en fonction des tranches d'age.
+
+L'observation selon laquelle les patients atteints des trois types de tumeurs rénales partagent de nombreux transcriptomes, mais présentent également des variations en fonction de l'âge, suggère que l'âge peut être un facteur important dans la modulation des profils transcriptomiques dans le cancer rénal. Cette observation souligne la nécessité de prendre en compte l'âge des patients lors de l'analyse des données transcriptomiques, car il peut influencer les caractéristiques moléculaires de la maladie et avoir des implications pour le diagnostic, le pronostic et le traitement. En se concentrant sur l'Analyse en Composantes Principales (ACP) pour un type de tumeur spécifique, il serait possible d'explorer plus en détail les variations transcriptomiques en fonction des tranches d'âge, ce qui pourrait fournir des informations précieuses sur la biologie et la progression du cancer rénal.
