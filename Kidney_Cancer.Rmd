@@ -5,24 +5,6 @@ output:
     df_print: paged
 ---
 
-Vous devez me rendre un compte-rendu **avant mardi 12 mars à la fin de la séance** (par mail: [alexandre.dos-santos\@u-pec.fr](mailto:alexandre.dos-santos@u-pec.fr)).
-
-Vous pouvez, uniquement pendant la durée du TP, me poser des questions, si vous ne comprenez pas certaines questions ou si vous avez des difficultés à transcrire vos idées d'analyses en langage R.
-
-Utilisez ce fichier Notebook pour répondre directement aux questions
-
-Vous serez noté sur:
-
--   Vos compétences à comprendre les questions énoncées
-
--   Traduire en R les étapes d'analyses
-
--   Votre capacité à commenter, discuter et conclure les résultats obtenus
-
-**TOUTES VOS RÉPONSES DOIVENT ÊTRE JUSTIFIÉES !!!**
-
-***N'oubliez pas de sauvegarder régulièrement votre document !!!!***
-
 # The Cancer Genome Atlas Program (TCGA)
 
 L'**Atlas du génome du cancer** (TCGA), un programme historique de génomique du cancer, a caractérisé moléculairement plus de **20 000 échantillons primaires de cancer et d'échantillons normaux appariés couvrant 33 types de cancer**. Cet effort conjoint du NCI et du National Human Genome Research Institute a débuté en 2006, réunissant des chercheurs de diverses disciplines et de plusieurs institutions.
